@@ -152,6 +152,12 @@
 	     result)))
     (nreverse result)))
 
+(defun sqorm-dehyphenate (elem)
+  (replace-regexp-in-string "-" "_" (symbol-name elem)))
+
+(defun sqorm-hyphenate (elem)
+  (replace-regexp-in-string "_" "-" elem))
+
 (provide 'sqorm)
 
 ;;; sqorm.el ends here
