@@ -1,4 +1,4 @@
-;;; sqorm.el --- querying the sqorm movie database -*- lexical-binding: t -*-
+;;; sqorm.el --- An ORM for sqlite3 -*- lexical-binding: t -*-
 ;; Copyright (C) 2020 Lars Magne Ingebrigtsen
 
 ;; Author: Lars Magne Ingebrigtsen <larsi@gnus.org>
@@ -157,6 +157,25 @@
 
 (defun sqorm-hyphenate (elem)
   (replace-regexp-in-string "_" "-" elem))
+
+(defun sqorm-make (table values tables)
+  (nconc (list :_type table)
+	 (loop for column in (cdr (assq table tables))
+	       for value in values
+	       for type = (cadr column)
+	       append (list (intern (format ":%s" (car column)) obarray)
+			    (cond
+			     ((and value
+				   (or (eq type 'integer)
+				       (eq type 'number)
+				       (eq type 'float)))
+			      (string-to-number value))
+			     ((eq type 'bool)
+			      (if (equal value "0")
+				  "N"
+				"Y"))
+			     (t
+			      value))))))
 
 (provide 'sqorm)
 
