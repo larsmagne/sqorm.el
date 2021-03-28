@@ -35,7 +35,7 @@
 ;;; Code:
 
 (require 'sqlite3)
-(require 'cl)
+(require 'cl-lib)
 
 (defvar sqorm-regexp nil
   "If non-nil, sqorm supports regexps in selects.")
@@ -51,30 +51,31 @@
     db))
 
 (defun sqorm-create-tables (tables)
-  (loop for (table . columns) in tables
-	do (sqlite3-execute-batch
-	    sqorm-db (format
-		      "create table if not exists %s (%s)"
-		      (sqorm-dehyphenate table)
-		      (mapconcat
-		       #'identity
-		       (loop for elem in columns
-			     collect (format
-				      "%s %s%s%s"
-				      (sqorm-dehyphenate (car elem))
-				      (if (equal (cadr elem) 'bool)
-					  "text"
-					(cadr elem))
-				      (if (memq :primary elem)
-					  " primary key"
-					"")
-				      (let ((references
-					     (cadr (memq :references elem))))
-					(if references
-					    (format " references %s"
-						    references)
-					  ""))))
-		       ", ")))))
+  (cl-loop for (table . columns) in tables
+	   do (sqlite3-execute-batch
+	       sqorm-db
+	       (format
+		"create table if not exists %s (%s)"
+		(sqorm-dehyphenate table)
+		(mapconcat
+		 #'identity
+		 (cl-loop for elem in columns
+			  collect (format
+				   "%s %s%s%s"
+				   (sqorm-dehyphenate (car elem))
+				   (if (equal (cadr elem) 'bool)
+				       "text"
+				     (cadr elem))
+				   (if (memq :primary elem)
+				       " primary key"
+				     "")
+				   (let ((references
+					  (cadr (memq :references elem))))
+				     (if references
+					 (format " references %s"
+						 references)
+				       ""))))
+		 ", ")))))
 
 (defun sqorm-exec (statement values)
   (sqlite3-execute-batch sqorm-db statement values))
@@ -88,22 +89,22 @@
 	   (sqorm-dehyphenate (getf object :_type))
 	   (mapconcat
 	    #'identity
-	    (loop for (column nil) on (cddr object) by #'cddr
-		  collect (sqorm-column-name column))
+	    (cl-loop for (column nil) on (cddr object) by #'cddr
+		     collect (sqorm-column-name column))
 	    ",")
 	   (mapconcat
 	    #'identity
-	    (loop repeat (/ (length (cddr object)) 2)
+	    (cl-loop repeat (/ (length (cddr object)) 2)
 		  collect "?")
 	    ","))
    (coerce
-    (loop for (nil value) on (cddr object) by #'cddr
-	  collect value)
+    (cl-loop for (nil value) on (cddr object) by #'cddr
+	     collect value)
     'vector)))
 
 (defun sqorm-select (table &rest values)
-  (apply 'sqorm-find table (loop for (key val) on values by #'cddr
-				append (list key '= val))))
+  (apply 'sqorm-find table (cl-loop for (key val) on values by #'cddr
+				    append (list key '= val))))
 
 (defun sqorm-column (column)
   (intern (format ":%s" (replace-regexp-in-string "[^-a-zA-Z0-9]" ""
@@ -117,9 +118,9 @@
      statement
      (coerce values 'vector)
      (lambda (row names)
-       (push (nconc (loop for value in row
-			  for column in names
-			  append (list (sqorm-column column) value)))
+       (push (nconc (cl-loop for value in row
+			     for column in names
+			     append (list (sqorm-column column) value)))
 	     result)))
     (nreverse result)))
 
@@ -132,23 +133,24 @@
       (sqorm-dehyphenate table)
       (mapconcat
        #'identity
-       (loop for (column predicate nil) on values by #'cdddr
-	     collect (format "%s %s ?"
-			     (sqorm-column-name column)
-			     predicate))
+       (cl-loop for (column predicate nil) on values by #'cdddr
+		collect (format "%s %s ?"
+				(sqorm-column-name column)
+				predicate))
        " and "))
      (coerce
-      (loop for (nil nil value) on values by #'cdddr
-	    collect value)
+      (cl-loop for (nil nil value) on values by #'cdddr
+	       collect value)
       'vector)
      (lambda (row names)
-       (push (nconc (list :_type table)
-		    (loop for value in row
-			  for column in names
-			  append (list
-				  (intern (format ":%s" (sqorm-hyphenate column))
-					  obarray)
-				  value)))
+       (push (nconc
+	      (list :_type table)
+	      (cl-loop for value in row
+		       for column in names
+		       append (list
+			       (intern (format ":%s" (sqorm-hyphenate column))
+				       obarray)
+			       value)))
 	     result)))
     (nreverse result)))
 
@@ -160,22 +162,22 @@
 
 (defun sqorm-make (table values tables)
   (nconc (list :_type table)
-	 (loop for column in (cdr (assq table tables))
-	       for value in values
-	       for type = (cadr column)
-	       append (list (intern (format ":%s" (car column)) obarray)
-			    (cond
-			     ((and value
-				   (or (eq type 'integer)
-				       (eq type 'number)
-				       (eq type 'float)))
-			      (string-to-number value))
-			     ((eq type 'bool)
-			      (if (equal value "0")
-				  "N"
-				"Y"))
-			     (t
-			      value))))))
+	 (cl-loop for column in (cdr (assq table tables))
+		  for value in values
+		  for type = (cadr column)
+		  append (list (intern (format ":%s" (car column)) obarray)
+			       (cond
+				((and value
+				      (or (eq type 'integer)
+					  (eq type 'number)
+					  (eq type 'float)))
+				 (string-to-number value))
+				((eq type 'bool)
+				 (if (equal value "0")
+				     "N"
+				   "Y"))
+				(t
+				 value))))))
 
 (provide 'sqorm)
 
