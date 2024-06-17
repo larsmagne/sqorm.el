@@ -1,5 +1,5 @@
-;;; sqorm.el --- An ORM for sqlite3 -*- lexical-binding: t -*-
-;; Copyright (C) 2020 Lars Magne Ingebrigtsen
+;;; sqorm.el --- An ORM for sqlite -*- lexical-binding: t -*-
+;; Copyright (C) 2020-2024 Lars Magne Ingebrigtsen
 
 ;; Author: Lars Magne Ingebrigtsen <larsi@gnus.org>
 ;; Keywords: movies
@@ -23,18 +23,11 @@
 
 ;;; Commentary:
 
-;; To work, this needs the sqlite3 module
-;; https://github.com/syohex/emacs-sqlite3
-;; which needs:
-
-;; sudo apt install sqlite3-pcre libsqlite3-dev
-
-;; The Emacs has to be pretty new -- anything older than Emacs 26
-;; probably won't work.  And it has to be built with module support.
+;; The Emacs has to be pretty new -- anything older than Emacs 29
+;; probably won't work.
 
 ;;; Code:
 
-(require 'sqlite3)
 (require 'cl-lib)
 
 (defvar sqorm-regexp nil
@@ -44,15 +37,13 @@
   "The default db.")
 
 (defun sqorm-open (file)
-  (let ((db (sqlite3-new (file-truename file))))
+  (let ((db (sqlite-open file)))
     (setq sqorm-db db)
-    (when (sqlite3-load-extension db "/usr/lib/sqlite3/pcre.so")
-      (setq sqorm-regexp t))
     db))
 
 (defun sqorm-create-tables (tables)
   (cl-loop for (table . columns) in tables
-	   do (sqlite3-execute-batch
+	   do (sqlite-execute
 	       sqorm-db
 	       (format
 		"create table if not exists %s (%s)"
@@ -78,7 +69,7 @@
 		 ", ")))))
 
 (defun sqorm-exec (statement values)
-  (sqlite3-execute-batch sqorm-db statement values))
+  (sqlite-execute sqorm-db statement values))
 
 (defun sqorm-column-name (column)
   (replace-regexp-in-string ":" "" (sqorm-dehyphenate column)))
@@ -86,7 +77,7 @@
 (defun sqorm-insert (object)
   (sqorm-exec
    (format "insert into %s(%s) values(%s)"
-	   (sqorm-dehyphenate (getf object :_type))
+	   (sqorm-dehyphenate (cl-getf object :_type))
 	   (mapconcat
 	    #'identity
 	    (cl-loop for (column nil) on (cddr object) by #'cddr
@@ -95,12 +86,10 @@
 	   (mapconcat
 	    #'identity
 	    (cl-loop repeat (/ (length (cddr object)) 2)
-		  collect "?")
+		     collect "?")
 	    ","))
-   (coerce
-    (cl-loop for (nil value) on (cddr object) by #'cddr
-	     collect value)
-    'vector)))
+   (cl-loop for (nil value) on (cddr object) by #'cddr
+	    collect value)))
 
 (defun sqorm-select (table &rest values)
   (apply 'sqorm-find table (cl-loop for (key val) on values by #'cddr
@@ -112,47 +101,32 @@
 	  obarray))
 
 (defun sqorm-select-where (statement &rest values)
-  (let ((result nil))
-    (sqlite3-execute
-     sqorm-db
-     statement
-     (coerce values 'vector)
-     (lambda (row names)
-       (push (nconc (cl-loop for value in row
-			     for column in names
-			     append (list (sqorm-column column) value)))
-	     result)))
-    (nreverse result)))
+  (sqorm--transform-result (sqlite-select sqorm-db statement values 'full)))
+
+(defun sqorm--transform-result (result)
+  (cl-loop with columns = (pop result)
+	   for row in result
+	   collect (cl-loop for column in columns
+			    for value in row
+			    append (list (sqorm-column column) value))))
 
 (defun sqorm-find (table &rest values)
-  (let ((result nil))
-    (sqlite3-execute
-     sqorm-db
-     (format
-      "select * from %s where %s"
-      (sqorm-dehyphenate table)
-      (mapconcat
-       #'identity
-       (cl-loop for (column predicate nil) on values by #'cdddr
-		collect (format "%s %s ?"
-				(sqorm-column-name column)
-				predicate))
-       " and "))
-     (coerce
-      (cl-loop for (nil nil value) on values by #'cdddr
-	       collect value)
-      'vector)
-     (lambda (row names)
-       (push (nconc
-	      (list :_type table)
-	      (cl-loop for value in row
-		       for column in names
-		       append (list
-			       (intern (format ":%s" (sqorm-hyphenate column))
-				       obarray)
-			       value)))
-	     result)))
-    (nreverse result)))
+  (sqorm--transform-result
+   (sqlite-select
+    sqorm-db
+    (format
+     "select * from %s where %s"
+     (sqorm-dehyphenate table)
+     (mapconcat
+      #'identity
+      (cl-loop for (column predicate nil) on values by #'cdddr
+	       collect (format "%s %s ?"
+			       (sqorm-column-name column)
+			       predicate))
+      " and "))
+    (cl-loop for (nil nil value) on values by #'cdddr
+	     collect value)
+    'full)))
 
 (defun sqorm-dehyphenate (elem)
   (replace-regexp-in-string "-" "_" (symbol-name elem)))
